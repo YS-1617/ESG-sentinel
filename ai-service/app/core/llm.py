@@ -26,7 +26,8 @@ class LLMGenerationError(Exception):
 
 class LLMJsonError(Exception):
     """Raised when a response cannot be parsed as JSON even after a
-    controlled repair attempt and retries."""
+    controlled repair attempt and retries.
+    """
 
 
 class LLMProvider(Protocol):
@@ -53,7 +54,6 @@ class GeminiProvider:
         self._model_name = model_name
 
         genai.configure(api_key=api_key)
-
         self._model = genai.GenerativeModel(model_name)
 
     def generate_text(
@@ -81,15 +81,18 @@ class GeminiProvider:
         except Exception as exc:
             error_type = type(exc).__name__
 
+            # Log the actual provider error so quota/rate-limit/model
+            # problems can be diagnosed. Never log the API key.
             logger.error(
                 "gemini_request_failed",
                 extra={
                     "error_type": error_type,
+                    "error": str(exc),
                 },
             )
 
             raise LLMGenerationError(
-                f"Gemini request failed: {error_type}"
+                f"Gemini request failed: {error_type}: {str(exc)}"
             ) from exc
 
         text = getattr(response, "text", None)
@@ -109,7 +112,6 @@ class GeminiProvider:
                     max_output_tokens=1
                 ),
             )
-
             return True
 
         except Exception as exc:
@@ -117,9 +119,9 @@ class GeminiProvider:
                 "llm_health_check_failed",
                 extra={
                     "error_type": type(exc).__name__,
+                    "error": str(exc),
                 },
             )
-
             return False
 
 
@@ -139,14 +141,9 @@ def _repair_json(raw: str) -> str:
     - Strips markdown code fences.
     - Extracts the outermost JSON object/array.
     - Removes trailing commas before closing brackets.
-
-    Never rewrites or guesses at content.
     """
 
-    text = _CODE_FENCE_RE.sub(
-        "",
-        raw,
-    ).strip()
+    text = _CODE_FENCE_RE.sub("", raw).strip()
 
     first = min(
         (
@@ -226,7 +223,7 @@ class LLMManager:
 
                 if attempt < self._config.max_retries:
                     delay_seconds = 10 * (
-                        2 ** attempt
+                        2**attempt
                     )
 
                     logger.info(
@@ -281,11 +278,9 @@ class LLMManager:
                 )
 
                 # Wait before retrying a failed Gemini request.
-                # This is particularly useful for temporary
-                # resource/quota exhaustion.
                 if attempt < self._config.max_retries:
                     delay_seconds = 10 * (
-                        2 ** attempt
+                        2**attempt
                     )
 
                     logger.info(
