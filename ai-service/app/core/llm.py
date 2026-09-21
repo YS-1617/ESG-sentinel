@@ -1,9 +1,11 @@
 """LLM abstraction.
 
-No module outside this file may import `google.generativeai` (or any other
-provider SDK) directly -- everything else depends on `LLMManager`, which
-wraps a swappable `LLMProvider`. This keeps the model provider replaceable
-and keeps API keys out of every other module.
+No module outside this file may import provider SDKs directly.
+Everything else depends on LLMManager, which wraps a swappable
+LLMProvider.
+
+This keeps the model provider replaceable and keeps API keys out
+of every other module.
 """
 
 from __future__ import annotations
@@ -25,9 +27,7 @@ class LLMGenerationError(Exception):
 
 
 class LLMJsonError(Exception):
-    """Raised when a response cannot be parsed as JSON even after a
-    controlled repair attempt and retries.
-    """
+    """Raised when a response cannot be parsed as JSON."""
 
 
 class LLMProvider(Protocol):
@@ -45,7 +45,7 @@ class LLMProvider(Protocol):
 
 
 class GeminiProvider:
-    """The only file in the codebase that touches google.generativeai."""
+    """Gemini implementation of the LLM provider."""
 
     def __init__(self, api_key: str, model_name: str) -> None:
         import google.generativeai as genai
@@ -77,12 +77,9 @@ class GeminiProvider:
                 prompt,
                 generation_config=generation_config,
             )
-
         except Exception as exc:
             error_type = type(exc).__name__
 
-            # Log the actual provider error so quota/rate-limit/model
-            # problems can be diagnosed. Never log the API key.
             logger.error(
                 "gemini_request_failed",
                 extra={
@@ -125,18 +122,109 @@ class GeminiProvider:
             return False
 
 
+class GroqProvider:
+    """Groq implementation of the LLM provider."""
+
+    def __init__(self, api_key: str, model_name: str) -> None:
+        from groq import Groq
+
+        self._model_name = model_name
+        self._client = Groq(api_key=api_key)
+
+    def generate_text(
+        self,
+        prompt: str,
+        *,
+        json_mode: bool = False,
+        temperature: float = 0.0,
+    ) -> str:
+        request_kwargs = {
+            "model": self._model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            "temperature": temperature,
+        }
+
+        if json_mode:
+            request_kwargs["response_format"] = {
+                "type": "json_object"
+            }
+
+        try:
+            response = self._client.chat.completions.create(
+                **request_kwargs
+            )
+
+        except Exception as exc:
+            error_type = type(exc).__name__
+
+            logger.error(
+                "groq_request_failed",
+                extra={
+                    "error_type": error_type,
+                    "error": str(exc),
+                },
+            )
+
+            raise LLMGenerationError(
+                f"Groq request failed: {error_type}: {str(exc)}"
+            ) from exc
+
+        try:
+            text = response.choices[0].message.content
+        except Exception as exc:
+            raise LLMGenerationError(
+                "Groq returned an unexpected response format"
+            ) from exc
+
+        if not text:
+            raise LLMGenerationError(
+                "Groq returned an empty response"
+            )
+
+        return text
+
+    def health_check(self) -> bool:
+        try:
+            self._client.chat.completions.create(
+                model=self._model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Respond with OK.",
+                    }
+                ],
+                max_tokens=1,
+            )
+            return True
+
+        except Exception as exc:
+            logger.warning(
+                "llm_health_check_failed",
+                extra={
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            return False
+
+
 _CODE_FENCE_RE = re.compile(
     r"^```(?:json)?\s*|\s*```$",
     re.IGNORECASE | re.MULTILINE,
 )
 
 _TRAILING_COMMA_RE = re.compile(
-    r",(\s*[\]}])"
+    r",(\s*[}\]])"
 )
 
 
 def _repair_json(raw: str) -> str:
-    """Conservative, safe repairs only.
+    """Conservative JSON repairs only.
 
     - Strips markdown code fences.
     - Extracts the outermost JSON object/array.
@@ -222,9 +310,7 @@ class LLMManager:
                 )
 
                 if attempt < self._config.max_retries:
-                    delay_seconds = 10 * (
-                        2**attempt
-                    )
+                    delay_seconds = 10 * (2**attempt)
 
                     logger.info(
                         "llm_retry_backoff",
@@ -277,11 +363,8 @@ class LLMManager:
                     },
                 )
 
-                # Wait before retrying a failed Gemini request.
                 if attempt < self._config.max_retries:
-                    delay_seconds = 10 * (
-                        2**attempt
-                    )
+                    delay_seconds = 10 * (2**attempt)
 
                     logger.info(
                         "llm_retry_backoff",
@@ -361,17 +444,39 @@ def get_llm_manager() -> LLMManager:
     if _llm_manager is None:
         settings = get_settings()
 
-        if settings.gemini_api_key is None:
-            raise LLMGenerationError(
-                "GEMINI_API_KEY is not configured; "
-                "set it in the environment before using "
-                "the LLM manager"
+        provider_name = settings.llm_provider.lower()
+
+        if provider_name == "groq":
+            if settings.groq_api_key is None:
+                raise LLMGenerationError(
+                    "GROQ_API_KEY is not configured; "
+                    "set it in the environment before using "
+                    "the LLM manager"
+                )
+
+            provider = GroqProvider(
+                api_key=settings.groq_api_key.get_secret_value(),
+                model_name=settings.groq_model_name,
             )
 
-        provider = GeminiProvider(
-            api_key=settings.gemini_api_key.get_secret_value(),
-            model_name=settings.gemini_model_name,
-        )
+        elif provider_name == "gemini":
+            if settings.gemini_api_key is None:
+                raise LLMGenerationError(
+                    "GEMINI_API_KEY is not configured; "
+                    "set it in the environment before using "
+                    "the LLM manager"
+                )
+
+            provider = GeminiProvider(
+                api_key=settings.gemini_api_key.get_secret_value(),
+                model_name=settings.gemini_model_name,
+            )
+
+        else:
+            raise LLMGenerationError(
+                f"Unsupported LLM provider: {settings.llm_provider}. "
+                f"Supported providers are: gemini, groq"
+            )
 
         _llm_manager = LLMManager(provider)
 

@@ -586,9 +586,16 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
-    # --- LLM provider (Gemini) ---
+   # --- LLM provider ---
+    llm_provider: Literal["gemini", "groq"] = "groq"
+
+    # Gemini
     gemini_api_key: SecretStr | None = None
     gemini_model_name: str = "gemini-3.6-flash"
+
+    # Groq
+    groq_api_key: SecretStr | None = None
+    groq_model_name: str = "openai/gpt-oss-120b"
 
     # --- Embedding / reranking models ---
     embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"

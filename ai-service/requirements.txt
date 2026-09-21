@@ -18,6 +18,7 @@ pymupdf==1.24.13
 
 # --- Phase 3: LLM abstraction (installed & tested) ---
 google-generativeai==0.8.3
+groq
 
 # --- Phase 5: evidence indexing & hybrid retrieval prep (installed & tested) ---
 sentence-transformers==3.3.1
