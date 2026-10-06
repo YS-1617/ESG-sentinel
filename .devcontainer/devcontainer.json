@@ -1,0 +1,27 @@
+{
+  "name": "ESG Sentinel AI Service",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "4gb"
+  },
+  "containerEnv": {
+    "ENVIRONMENT": "production",
+    "LLM_PROVIDER": "groq",
+    "TOKENIZERS_PARALLELISM": "false"
+  },
+  "secrets": {
+    "GROQ_API_KEY": {
+      "description": "Groq API key used by the AI service"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/install-ai.sh",
+  "postStartCommand": "bash .devcontainer/start-ai.sh",
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "ESG AI Service",
+      "onAutoForward": "silent"
+    }
+  }
+}
