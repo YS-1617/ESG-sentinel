@@ -13,6 +13,12 @@
   "secrets": {
     "GROQ_API_KEY": {
       "description": "Groq API key used by the AI service"
+    },
+    "NGROK_AUTHTOKEN": {
+      "description": "ngrok authtoken (dashboard.ngrok.com > Your Authtoken)"
+    },
+    "NGROK_DOMAIN": {
+      "description": "Your free ngrok static domain, e.g. example-name.ngrok-free.dev"
     }
   },
   "postCreateCommand": "bash .devcontainer/install-ai.sh",
